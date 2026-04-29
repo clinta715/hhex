@@ -66,6 +66,11 @@ bool MemoryMappedFileAccess::remapWindowForRange(uint64_t offset, uint64_t lengt
         _view = nullptr;
     }
 
+    // Reset state before attempting remap to avoid inconsistent state
+    _windowOffset = 0;
+    _windowSize = 0;
+    _useWindowedMapping = false;
+
     // Map new window
     DWORD offsetHigh = (DWORD)(newWindowOffset >> 32);
     DWORD offsetLow = (DWORD)(newWindowOffset & 0xFFFFFFFF);
@@ -79,6 +84,7 @@ bool MemoryMappedFileAccess::remapWindowForRange(uint64_t offset, uint64_t lengt
         return false;
     }
 
+    // Only update state after successful mapping
     _windowOffset = newWindowOffset;
     _windowSize = newWindowSize;
     _useWindowedMapping = true;
@@ -211,8 +217,8 @@ bool MemoryMappedFileAccess::writeByte(uint64_t offset, uint8_t value) {
 }
 
 bool MemoryMappedFileAccess::flush(std::wstring& error) {
-    if (!_view) {
-        return true; // Nothing mapped
+    if (!_view && !_useWindowedMapping) {
+        return true; // Nothing mapped and not using windowed mode
     }
 
     if (!_useWindowedMapping) {
@@ -223,9 +229,14 @@ bool MemoryMappedFileAccess::flush(std::wstring& error) {
         }
     } else {
         // Windowed mapping - flush current window only
-        if (!FlushViewOfFile(_view, (SIZE_T)_windowSize)) {
-            error = L"FlushViewOfFile (windowed) failed: " + FormatLastError(GetLastError());
-            return false;
+        // NOTE: This is intentionally limited. For flushing all dirty pages,
+        // use SaveManager::flushDirtyPages() which calls flushRange() for each dirty range.
+        // The fallback in SaveToFile() should NOT use this method.
+        if (_view) {
+            if (!FlushViewOfFile(_view, (SIZE_T)_windowSize)) {
+                error = L"FlushViewOfFile (windowed) failed: " + FormatLastError(GetLastError());
+                return false;
+            }
         }
     }
 
@@ -237,6 +248,9 @@ bool MemoryMappedFileAccess::flush(std::wstring& error) {
     }
     return true;
 }
+
+
+
 
 bool MemoryMappedFileAccess::flushRange(uint64_t offset, uint64_t length, std::wstring& error) {
     if (!_view || length == 0) {
@@ -289,6 +303,14 @@ bool MemoryMappedFileAccess::flushRange(uint64_t offset, uint64_t length, std::w
         }
     }
     return true;
+}
+
+bool MemoryMappedFileAccess::prepareAccess(uint64_t offset, uint64_t length) {
+    if (!_useWindowedMapping) {
+        return true; // Full mapping - no need to remap
+    }
+    std::wstring error;
+    return remapWindowForRange(offset, length, error);
 }
 
 void MemoryMappedFileAccess::close() {

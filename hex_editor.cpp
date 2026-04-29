@@ -855,16 +855,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
          }
          return true;
      }
-     // Failure path: attempt full flush fallback
-     std::wstring fallbackError;
-     bool fallbackOk = g_fileAccess->flush(fallbackError);
+     // flushDirtyPages() failed - report error (no fallback because:
+     // 1. In windowed mode, flush() only flushes current window
+     // 2. If selective flush failed, full flush likely will too
      std::string narrowError(error.begin(), error.end());
-     if (fallbackOk) {
-         narrowError += " (Full flush fallback succeeded)";
-     } else {
-         std::string fbNarrow(fallbackError.begin(), fallbackError.end());
-         narrowError += " (Fallback failed: " + fbNarrow + ")";
-     }
      MessageBox(NULL, ("Failed to save file: " + narrowError).c_str(), "Error", MB_ICONERROR);
      return false;
  }

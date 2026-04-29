@@ -69,11 +69,12 @@ The program crashed when opening large files (>1-2 GB) because `MemoryMappedFile
 
 **Problem:** In windowed mode, `flush()` only flushes the current window. When `SaveToFile()` falls back to `flush()` after `flushDirtyPages()` fails, it won't flush dirty pages in other windows.
 
-**Planned Fix:**
-- Modify `flush()` to iterate through all dirty pages using the dirty bitmap
-- OR change the fallback in `SaveToFile()` to not use `flush()` but instead report the error properly
+**Fix Implemented:** Removed the fallback to `flush()` in `SaveToFile()`. If `flushDirtyPages()` fails, we now report the error directly. This is correct because:
+- `flushDirtyPages()` uses `flushRange()` which properly handles windowed mode
+- If selective flush fails, full flush would likely also fail
+- The dirty bitmap is cleared by `flushDirtyPages()` only on success
 
-**Status:** Planned
+**Status:** FIXED (2026-04-29)
 
 ---
 
@@ -82,11 +83,9 @@ The program crashed when opening large files (>1-2 GB) because `MemoryMappedFile
 
 **Problem:** When `SaveToFile()` falls back to `flush()` after `flushDirtyPages()` fails, the dirty bitmap is never cleared. Next save attempt will try to flush the same (possibly failed) pages again.
 
-**Planned Fix:**
-- Clear dirty bitmap only after successful flush
-- Track which pages were successfully flushed and clear only those
+**Fix Implemented:** Removed the fallback in `SaveToFile()`. The dirty bitmap is cleared by `SaveManager::flushDirtyPages()` only after successful selective flush. Since we no longer attempt a fallback flush that doesn't clear the bitmap, this issue is resolved.
 
-**Status:** Planned
+**Status:** FIXED (2026-04-29)
 
 ---
 
@@ -98,21 +97,23 @@ The program crashed when opening large files (>1-2 GB) because `MemoryMappedFile
 - But `_useWindowedMapping`, `_windowOffset`, `_windowSize` retain stale values
 - Subsequent calls might incorrectly think a window is mapped
 
-**Planned Fix:**
+**Fix Implemented:** Reset state BEFORE attempting remap:
 ```cpp
-// Reset state before attempting remap
+// Reset state before attempting remap to avoid inconsistent state
 _windowOffset = 0;
 _windowSize = 0;
 _useWindowedMapping = false;
 
 // Then attempt remap
 if (!_view) {
-    // Unmap current view
+    UnmapViewOfFile(_view);
+    _view = nullptr;
 }
 // Map new view...
+// Only update state after successful mapping
 ```
 
-**Status:** Planned
+**Status:** FIXED (2026-04-29)
 
 ---
 
