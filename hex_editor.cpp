@@ -235,7 +235,7 @@ void RenderHexView(HDC hdc, RECT& rc) {
     size_t totalBytes = (size_t)totalBytes64;
     int totalLines = (int)((totalBytes + BYTES_PER_LINE - 1) / BYTES_PER_LINE);
     int startLine = g_editorState.firstVisibleLine;
-    int linesToDraw = min(g_editorState.visibleLines, totalLines - startLine);
+    int linesToDraw = min(g_editorState.visibleLines, max(0, totalLines - startLine));
 
     // Pre-load window to cover all bytes that will be rendered (optimization for windowed mapping)
     if (g_fileAccess && g_fileAccess->isOpen()) {
@@ -244,7 +244,10 @@ void RenderHexView(HDC hdc, RECT& rc) {
         if (startOffset + bytesToAccess > totalBytes64) {
             bytesToAccess = totalBytes64 - startOffset;
         }
-        g_fileAccess->prepareAccess(startOffset, bytesToAccess);
+        if (!g_fileAccess->prepareAccess(startOffset, bytesToAccess)) {
+            // Log error - rendering will still work but may be slower with individual remaps
+            OutputDebugStringA("prepareAccess failed\n");
+        }
     }
 
     // Set default colors
@@ -641,9 +644,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                         }
                         if (digits > 0) {
                             if (g_editorState.cursorIndex < g_fileAccess->size()) {
-                                g_fileAccess->writeByte(g_editorState.cursorIndex, (uint8_t)byteVal);
-                                g_dirtyBitmap.mark(g_editorState.cursorIndex);
-                                g_editorState.cursorIndex++;
+                                if (g_fileAccess->writeByte(g_editorState.cursorIndex, (uint8_t)byteVal)) {
+                                    g_dirtyBitmap.mark(g_editorState.cursorIndex);
+                                    g_editorState.cursorIndex++;
+                                } else {
+                                    // Write failed - beep to indicate error
+                                    MessageBeep(MB_ICONERROR);
+                                }
                             } else {
                                 break;
                             }
@@ -670,8 +677,11 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) 
                 SetClipboardData(CF_TEXT, hMem);
                 CloseClipboard();
             }
-            g_fileAccess->writeByte(g_editorState.cursorIndex, 0);
-            g_dirtyBitmap.mark(g_editorState.cursorIndex);
+            if (g_fileAccess->writeByte(g_editorState.cursorIndex, 0)) {
+                g_dirtyBitmap.mark(g_editorState.cursorIndex);
+            } else {
+                MessageBeep(MB_ICONERROR);
+            }
             InvalidateRect(hwnd, NULL, FALSE);
         } break;
 

@@ -34,4 +34,13 @@ public:
     // Prepare access for a range - hint to implementation to prefetch/remap (optional optimization).
     // Default implementation does nothing; override in subclasses that benefit from prefetching.
     virtual bool prepareAccess(uint64_t /*offset*/, uint64_t /*length*/) { return true; }
+
+    // Get last error from read/write operations (empty string if no error)
+    virtual std::string getLastError() const { return ""; }
+
+    // Flush a range of bytes to disk (optional - only meaningful for memory-mapped implementations).
+    // Default implementation calls flush() for backward compatibility.
+    virtual bool flushRange(uint64_t /*offset*/, uint64_t /*length*/, std::wstring& error) {
+        return flush(error);
+    }
 };

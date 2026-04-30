@@ -27,6 +27,9 @@ private:
     bool remapWindowForRange(uint64_t offset, uint64_t length, std::wstring& error) const;
     uint64_t alignDown(uint64_t offset) const;
 
+    // Last error storage (mutable for const methods)
+    mutable std::string _lastError;
+
 public:
     MemoryMappedFileAccess() = default;
     ~MemoryMappedFileAccess() override { close(); }
@@ -34,12 +37,15 @@ public:
     bool open(const std::wstring& path, std::wstring& error) override;
     bool isOpen() const override { return _hMapping != NULL; }
     uint64_t size() const override { return _size; }
-    uint8_t readByte(uint64_t offset) const override;
+    uint8_t readByte(uint64_t offset) const override;  // const but can remap window (uses mutable)
     bool writeByte(uint64_t offset, uint8_t value) override;
     bool flush(std::wstring& error) override;
-    bool flushRange(uint64_t offset, uint64_t length, std::wstring& error);
+    bool flushRange(uint64_t offset, uint64_t length, std::wstring& error) override;
     void close() override;
 
     // Prepare access for a range - pre-loads window for better performance
     bool prepareAccess(uint64_t offset, uint64_t length) override;
+
+    // Get last error from read/write operations
+    std::string getLastError() const override { return _lastError; }
 };

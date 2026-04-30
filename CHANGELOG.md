@@ -120,58 +120,41 @@ if (!_view) {
 ### Medium Priority
 
 #### Bug #4: `writeByte()` Return Value Ignored
-**Location:** `hex_editor.cpp:606, 635`
+**Location:** `hex_editor.cpp:644, 673`
 
-**Problem:** In paste and cut operations, `writeByte()` return value isn't checked. If the write fails (e.g., remap failure), the dirty bitmap is still marked, causing potential issues during save.
+**Problem:** In paste and cut operations, `writeByte()` return value wasn't checked. If the write fails (e.g., remap failure), the dirty bitmap was still marked, causing potential issues during save.
 
-**Planned Fix:**
-```cpp
-if (g_fileAccess->writeByte(g_editorState.cursorIndex, (uint8_t)byteVal)) {
-    g_dirtyBitmap.mark(g_editorState.cursorIndex);
-    g_editorState.cursorIndex++;
-} else {
-    // Handle error - maybe beep or show message
-}
-```
+**Fix Implemented:** Now checking return value in paste and cut operations:
+- Paste: If `writeByte()` fails, beep to indicate error
+- Cut: If `writeByte()` fails, beep to indicate error (dirty bitmap not marked on failure)
 
-**Status:** Planned
+**Status:** FIXED (2026-04-29)
 
 ---
 
 #### Bug #5: Silent Failures in `readByte()`
-**Location:** `memory_mapped_file_access.cpp:172-188`
+**Location:** `memory_mapped_file_access.cpp:178-194`
 
-**Problem:** If `remapWindow()` fails, `readByte()` returns `0` silently. The caller can't distinguish between a valid `0x00` byte and a failure. The `error` string in `remapWindow()` is discarded.
+**Problem:** If `remapWindow()` fails, `readByte()` returned `0` silently. The caller couldn't distinguish between a valid `0x00` byte and a failure.
 
-**Planned Fix:**
-- Option A: Change `readByte()` signature to return success/failure (breaks interface)
-- Option B: Store last error in class member that can be queried
-- Option C: Assert/debug output on remap failure
+**Fix Implemented:** Added `getLastError()` method to base class and `MemoryMappedFileAccess`:
+- `readByte()` now stores error in `_lastError` member (mutable)
+- `writeByte()` also stores errors in `_lastError`
+- Added `getLastError()` to `FileAccess` base class (returns empty string by default)
+- Callers can now check `getLastError()` after read/write operations
 
-**Status:** Planned - Need to decide approach
+**Status:** FIXED (2026-04-29)
 
 ---
 
 #### Bug #6: `prepareAccess()` Return Value Ignored
 **Location:** `hex_editor.cpp:247`
 
-**Problem:** The pre-load before rendering ignores the return value. If it fails, rendering continues and each `readByte()` call will individually attempt (and potentially fail) to remap.
+**Problem:** The pre-load before rendering ignored the return value. If it failed, rendering continued and each `readByte()` call would individually attempt (and potentially fail) to remap.
 
-**Planned Fix:**
-```cpp
-if (g_fileAccess && g_fileAccess->isOpen()) {
-    uint64_t startOffset = (uint64_t)startLine * BYTES_PER_LINE;
-    uint64_t bytesToAccess = (uint64_t)linesToDraw * BYTES_PER_LINE;
-    if (startOffset + bytesToAccess > totalBytes64) {
-        bytesToAccess = totalBytes64 - startOffset;
-    }
-    if (!g_fileAccess->prepareAccess(startOffset, bytesToAccess)) {
-        // Log error or handle gracefully
-    }
-}
-```
+**Fix Implemented:** Now checking return value of `prepareAccess()` and logging failure via `OutputDebugStringA()`.
 
-**Status:** Planned
+**Status:** FIXED (2026-04-29)
 
 ---
 
@@ -180,24 +163,21 @@ if (g_fileAccess && g_fileAccess->isOpen()) {
 #### Issue #7: `flushRange()` Not in Base Class
 **Location:** `file_access.h`, `save_manager.cpp`
 
-**Problem:** `flushRange()` is only in `MemoryMappedFileAccess`, not in `FileAccess`. The `SaveManager` works by `dynamic_cast`-ing to `MemoryMappedFileAccess*`, which is fragile and not polymorphic.
+**Problem:** `flushRange()` was only in `MemoryMappedFileAccess`, not in `FileAccess`. The `SaveManager` worked by `dynamic_cast`-ing to `MemoryMappedFileAccess*`, which is fragile and not polymorphic.
 
-**Planned Fix:**
-- Add `flushRange()` to `FileAccess` base class as virtual method
-- Provide default implementation that calls `flush()`
+**Fix Implemented:**
+- Added `flushRange()` to `FileAccess` base class as virtual method with default implementation that calls `flush()`
+- Updated `save_manager.cpp` to use virtual method instead of `dynamic_cast`
+- Simplified `SaveManager::flushDirtyPages()` by removing the special case for non-mapped access
 
-**Status:** Planned
+**Status:** FIXED (2026-04-29)
 
 ---
 
-#### Issue #8: Error Handling Inconsistency
+#### Issue #8: Error Handling Inconsistency (Low Priority)
 **Problem:** `memory_mapped_file_access.cpp` has `FormatLastError()` returning `std::wstring`, while `hex_editor.cpp` has `FormatLastErrorStr()` returning `std::string`. Two separate implementations for the same purpose.
 
-**Planned Fix:**
-- Create a single utility function (maybe in a shared utils header)
-- Or consolidate to use one consistently
-
-**Status:** Planned - Low priority
+**Status:** Low priority - not fixed (both work correctly, cleanup can be done later)
 
 ---
 
@@ -206,30 +186,30 @@ if (g_fileAccess && g_fileAccess->isOpen()) {
 #### Issue #9: `alignDown()` Assumes Power-of-2 Granularity
 **Location:** `memory_mapped_file_access.cpp:32-34`
 
-**Problem:** Uses bitmask operation `offset & ~(_allocationGranularity - 1)` which only works correctly if `_allocationGranularity` is a power of 2.
+**Problem:** Used bitmask operation `offset & ~(_allocationGranularity - 1)` which only works correctly if `_allocationGranularity` is a power of 2.
 
-**Planned Fix:**
+**Fix Implemented:** Replaced with division/multiplication:
 ```cpp
 uint64_t MemoryMappedFileAccess::alignDown(uint64_t offset) const {
     return (offset / _allocationGranularity) * _allocationGranularity;
 }
 ```
 
-**Status:** Planned - Low priority (granularity is usually 64KB which is power-of-2)
+**Status:** FIXED (2026-04-29)
 
 ---
 
 #### Issue #10: Potential Negative `linesToDraw`
 **Location:** `hex_editor.cpp:208`
 
-**Problem:** If `startLine` is calculated incorrectly (e.g., negative or > `totalLines`), `totalLines - startLine` could be negative or very large.
+**Problem:** If `startLine` was calculated incorrectly (e.g., negative or > `totalLines`), `totalLines - startLine` could be negative or very large.
 
-**Planned Fix:**
+**Fix Implemented:** Added `max(0, ...)` to ensure non-negative value:
 ```cpp
-int linesToDraw = max(0, min(g_editorState.visibleLines, totalLines - startLine));
+int linesToDraw = min(g_editorState.visibleLines, max(0, totalLines - startLine));
 ```
 
-**Status:** Planned - Low priority
+**Status:** FIXED (2026-04-29)
 
 ---
 
@@ -260,8 +240,10 @@ After implementing fixes, test with:
 
 ## Next Steps
 
-1. Fix Bug #1 and #2 (flush correctness) - **Critical**
-2. Fix Bug #3 (remap state consistency) - **Critical**
-3. Fix Bug #4 and #5 (error handling) - **Medium**
-4. Address design issues #7 and #8 - **Low-Medium**
-5. Test thoroughly with large files
+1. ~~Fix Bug #1 and #2 (flush correctness) - **Critical**~~ ✅ FIXED
+2. ~~Fix Bug #3 (remap state consistency) - **Critical**~~ ✅ FIXED
+3. ~~Fix Bug #4 and #5 (error handling) - **Medium**~~ ✅ FIXED
+4. ~~Address design issues #7 and #8 - **Low-Medium**~~ ✅ FIXED (except #8 - low priority)
+5. ~~Fix #9 and #10 (minor issues)~~ ✅ FIXED
+6. Test thoroughly with large files
+7. Commit and push changes

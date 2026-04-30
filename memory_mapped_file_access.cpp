@@ -30,7 +30,7 @@ static std::wstring FormatLastError(DWORD code) {
 
 // Align offset down to allocation granularity
 uint64_t MemoryMappedFileAccess::alignDown(uint64_t offset) const {
-    return offset & ~(_allocationGranularity - 1);
+    return (offset / _allocationGranularity) * _allocationGranularity;
 }
 
 // Remap window to cover the given offset (const method - modifies mutable members)
@@ -176,7 +176,12 @@ bool MemoryMappedFileAccess::open(const std::wstring& path, std::wstring& error)
 }
 
 uint8_t MemoryMappedFileAccess::readByte(uint64_t offset) const {
-    if (offset >= _size) return 0;
+    _lastError.clear();  // Clear previous error
+
+    if (offset >= _size) {
+        _lastError = "readByte: offset out of range";
+        return 0;
+    }
 
     if (!_useWindowedMapping) {
         // Full mapping - direct access
@@ -186,6 +191,12 @@ uint8_t MemoryMappedFileAccess::readByte(uint64_t offset) const {
         if (offset < _windowOffset || offset >= _windowOffset + _windowSize) {
             std::wstring error;
             if (!remapWindow(offset, error)) {
+                // Convert wstring to string for _lastError
+                int nChars = WideCharToMultiByte(CP_ACP, 0, error.c_str(), -1, NULL, 0, NULL, NULL);
+                if (nChars > 0) {
+                    _lastError.resize(nChars - 1);
+                    WideCharToMultiByte(CP_ACP, 0, error.c_str(), -1, &_lastError[0], nChars, NULL, NULL);
+                }
                 return 0; // Failed to remap
             }
         }
@@ -194,7 +205,12 @@ uint8_t MemoryMappedFileAccess::readByte(uint64_t offset) const {
 }
 
 bool MemoryMappedFileAccess::writeByte(uint64_t offset, uint8_t value) {
-    if (offset >= _size) return false;
+    _lastError.clear();  // Clear previous error
+
+    if (offset >= _size) {
+        _lastError = "writeByte: offset out of range";
+        return false;
+    }
 
     if (!_useWindowedMapping) {
         // Full mapping - direct access
@@ -206,9 +222,15 @@ bool MemoryMappedFileAccess::writeByte(uint64_t offset, uint8_t value) {
             _view[offset - _windowOffset] = value;
             return true;
         }
-        // Need to remap - but this is non-const, so we can do it
+        // Need to remap
         std::wstring error;
         if (!remapWindow(offset, error)) {
+            // Convert wstring to string for _lastError
+            int nChars = WideCharToMultiByte(CP_ACP, 0, error.c_str(), -1, NULL, 0, NULL, NULL);
+            if (nChars > 0) {
+                _lastError.resize(nChars - 1);
+                WideCharToMultiByte(CP_ACP, 0, error.c_str(), -1, &_lastError[0], nChars, NULL, NULL);
+            }
             return false;
         }
         _view[offset - _windowOffset] = value;
